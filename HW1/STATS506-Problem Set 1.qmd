@@ -1,0 +1,312 @@
+---
+title: "STATS506-Problem Set 1"
+author: "Shenyi Tang"
+date: "5 Sep 2024"
+geometry: "left=2cm, right=2cm, top=2cm, bottom=2cm"
+format: pdf
+output:
+  pdf-document:
+    extra_dependencies:
+      listings: null
+      enumitem: shortlabels
+editor: source
+---
+
+## Shenyi Tang's GitHub Repo For STATS 506 FA 2024
+
+[https://github.com/shenyi-tang/stats506-computing-methods-and-tools.git](https://github.com/shenyi-tang/stats506-computing-methods-and-tools.git)
+
+## R Packages
+```{r, message=FALSE}
+library("dplyr")
+library("scales")
+```
+
+## Problem 1 - Wine Data
+\begin{itemize}
+\item[a.]Import the data into a data.frame in R. Use the information in the \verb|wine.names| file to give appropriate column names.
+\end{itemize}
+```{r, tidy=TRUE}
+wd <-  read.table('wine/wine.data',
+                  header = FALSE,
+                  sep = ',')
+names(wd) <- c("class", "alcohol", "m_acid", "ash",
+               "alcalinity", "mg", "t_phenols",
+               "flv", "nonflv_phenols", "pac",
+               "color", "hue", "od", "proline")
+```
+
+\begin{itemize}
+\item[b.]The data contains information on three different classes of wine. Check and report that the number of wines with in each class is correct as reported in \verb|wine.names|
+\end{itemize}
+```{r}
+aggregate(wd$class, by = list(wd$class), length)
+```
+- The number of wines in each class is correct as reported in \verb|wine.names|
+
+\begin{itemize}
+\item[c.]Use the data to answer the following questions: \\
+  \begin{enumerate}
+    \item What is the correlation between alcohol content and color intensity?
+    \item Which class has the highest correlation? Which has the lowest?
+    \item What is the alcohol content of the wine with the highest color intensity?
+    \item What percentage of wines had a higher content of proanthocyanins compare to ash?
+  \end{enumerate}
+\end{itemize}
+```{r,tidy=TRUE}
+## Question c.1
+cor(wd$alcohol, wd$color)
+
+## Question c.2
+# correlation group by class
+cor_result <- wd %>% group_by(class) %>% summarise(correlation = cor(alcohol, color))
+cor_result
+
+# find responding class
+highest_class <- 
+  cor_result$class[which(cor_result$correlation == max(cor_result$correlation))]
+lowest_class <- 
+  cor_result$class[which(cor_result$correlation == min(cor_result$correlation))]
+
+#output
+cat('class', 
+    highest_class, 
+    'has the highest correlation between alcohol and color intensity', "\n")
+cat('class', 
+    lowest_class, 
+    'has the lowest correlation between alcohol and color intensity', "\n")
+
+## Question c.3
+alcohol_content <- wd$alcohol[which(wd$color == max(wd$color))]
+cat("The alcohol content is", alcohol_content,
+    "with the highest color intensity", "\n")
+
+## Question c.4
+percentage <- (wd %>% filter(pac > ash) %>% nrow()) / nrow(wd)
+cat(percent(percentage, accuracy = 0.001),
+    "of wines had a higher content of proanthocyanins compare to ash.", "\n")
+
+```
+
+\begin{itemize}
+\item[d.]Create a table identifying the average value of each variable, providing one row for the overall average, and one row per class with class averages
+\end{itemize}
+```{r,tidy=TRUE}
+# mean by group
+mean1 <- aggregate(wd[,2:ncol(wd)], by = list(wd$class), mean)
+names(mean1)[1] <- 'Class'
+mean1$Class <- as.character(mean1$Class)
+
+# overall mean
+mean2 <- data.frame(t(apply(wd[,2:ncol(wd)], 2, mean)))
+# insert a new col as the first col
+mean2 <- mean2 %>% mutate(Class = 'overall') %>% select(Class, everything())
+
+bind_rows(mean1, mean2)
+```
+
+\begin{itemize}
+\item[e.]Carry out a series of t-tests to examine whether the level of phenols differs across the three classes. Present the R output and interpret the results.
+\end{itemize}
+```{r}
+phenols1 <- wd[wd$class == 1, "t_phenols"]
+phenols2 <- wd[wd$class == 2, "t_phenols"]
+phenols3 <- wd[wd$class == 3, "t_phenols"]
+
+# for class 1 and class 2
+t.test(phenols1, phenols2)
+
+# for class 2 and class 3
+t.test(phenols2, phenols3)
+
+# for class 1 and class 3
+t.test(phenols1, phenols3)
+```
+- \textbf{Class 1 and Class 2:} The t-value is out of the 95\% confidence interval and $p-value<0.05$. Therefore, the null hypothesis can be rejected, and it can be concluded that the levels of total phenols differ between class 1 wines and class 2 wines.
+- \textbf{Class 2 and Class 3:} The t-value is out of the 95\% confidence interval and $p-value<0.05$. Therefore, the null hypothesis can be rejected, and it can be concluded that the levels of total phenols differ between class 2 wines and class 3 wines.
+- \textbf{Class 1 and Class 3:} The t-value is out of the 95\% confidence interval and $p-value<0.05$. Therefore, the null hypothesis can be rejected, and it can be concluded that the levels of total phenols differ between class 1 wines and class 3 wines.
+
+## Problem 2 - AskManager.org Data
+
+\begin{itemize}
+\item[a.]Import the data into a data.frame in R. As with the wine data, you may downlaod the data outside of your submission, but importation should take place inside the problem set submission.
+\end{itemize}
+```{r}
+aam <- read.csv2('AskAManager.csv', 
+                 sep = ',', header = TRUE, encoding = 'utf-8')
+```
+
+\begin{itemize}
+\item[b.]Clean up the variable names. Simplify them.
+\end{itemize}
+```{r}
+names(aam) <- c('no.', 'timestamp', 'age', 'industry', "job_title",
+                'add_job_title', 'salary', 'compensation', 'currency', 'add_currency',
+                'add_income', 'country', 'us_state', 'city', 'overall_years',
+                'field_years', 'degree', 'gender', 'race')
+```
+
+\begin{itemize}
+\item[c.]Restrict the data to those being paid in US dollars (USD). Show that it worked by confirming the number of observations before and after restricting the data.
+\end{itemize}
+```{r}
+# before restricting data
+nrow(aam)
+
+# after restricting data
+aam_usd <- aam[aam$currency == 'USD',]
+nrow(aam_usd)
+```
+
+\begin{itemize}
+\item[d.]Assume no one starts working before age 18. Eliminate any rows for which their age, years of experience in their field, and years of experience total are impossible. Again, confirm the number of observations.
+\end{itemize}
+```{r}
+#' extract the first value of a string
+#'
+#' @param x, a character
+#'
+#' @return a numeric
+#' 
+#' @examples input "18-22" return 18
+
+extract_first_value <- function(x) {
+  return(as.numeric(gsub("[^0-9].*", "", x)))
+}
+
+
+aam2 <- aam %>% 
+  mutate(
+    start_age = extract_first_value(age),
+    start_overall_years = extract_first_value(overall_years),
+    start_field_years = extract_first_value(field_years)
+  )
+
+aam3 <- aam2 %>%
+  filter(
+    start_age >= 18,
+    start_overall_years >= start_field_years,
+    start_age >= start_overall_years
+  )
+
+nrow(aam3)
+```
+
+\begin{itemize}
+\item[e.]A lot of incomes are likely false. Eliminate any rows with extremely low or extremely high salaries. I'll leave the decision of what thresholds to use up to you; you could choose to eliminate only impossible values, or you could restrict the sample to eliminate the extreme values even if they are realistic. You must justify your choice, along with either a cited source or an exploration the data, or some combination.
+\end{itemize}
+```{r}
+# Thresholds for extreme low and extremely high salaries
+# Start with dataset aam3
+aam4 <- aam3 %>%
+  filter(
+    salary >= 29250,
+    salary <= 121470
+  )
+
+nrow(aam4)
+
+```
+- According to [Occupational Employment and Wage Statistics from U.S. Bureau of Labor Statistics in May 2023](https://www.bls.gov/oes/tables.htm), among all occupations, annual $10^{th}$ percentile wage is $\$29,050$, annual $90^{th}$ percentile wage is $\$121,470$.
+
+
+## Problem 3 - Palindromic Numbers
+
+\begin{itemize}
+\item[a.]Write function \verb|isPalindromic| that checks if a given positive integer is a palindrome. Be sure to provide a reasonable error on an invalid input. Be sure to document your function
+  \begin{itemize}
+  \item Input: A positive integer
+  \item Output: A list with two elements:
+    \begin{itemize}
+      \item \verb|isPalindromic|: A logical value indicating if the input is palindromic
+      \item \verb|reversed|: The input with its digits reversed
+    \end{itemize}
+  \end{itemize}
+\end{itemize}
+```{r,tidy=TRUE}
+#' @title to check if a positive integer is a palindrome
+#'
+#' @param x, a positive integer
+#' 
+#' @return1 isPalindromic, a logic to indicate if the input is palindromic
+#' @return2 reversed, reverse the input
+#'
+
+isPalindromic <- function(x) {
+  # verify valid input
+  if (is.numeric((x)) == FALSE|| x <= 0){
+    stop("The input should be a positive integer!")
+  }
+  
+  if (x %% 10 == 0 && x != 0) {
+    return(list(isPalindromic = FALSE, reversed = NA))
+  }
+  
+  char <- as.character(x)
+  # reverse and concat the char
+  rev_char <- paste(rev(strsplit(char, NULL)[[1]]), collapse = "")
+  
+  result <- list(
+    isPalindromic = (char == rev_char),
+    reversed = as.numeric(rev_char)
+  )
+  
+  return(result)
+}
+
+# test
+isPalindromic(39951)
+# test
+isPalindromic(734437)
+```
+
+\begin{itemize}
+\item[b.]Create a function \verb|nextPalindrome| that finds the next palindromic number strictly greater than the input. Be sure to provide a reasonable error on an invalid input.
+  \begin{itemize}
+    \item Input: A positive integer
+    \item Output: A vector of length 1 with the next palindromic number greater than the input
+  \end{itemize}
+\end{itemize}
+```{r, tidy=TRUE}
+#' @title to find the next palindrome strictly greater than the input
+#'
+#' @param x, a positive integer
+#' @return a vector of length 1
+#'
+nextPalindrome <- function(x) {
+  # verify valid input
+  if (is.numeric((x)) == FALSE|| x <= 0){
+    stop("The input should be a positive integer!")
+  }
+  
+  num <- x + 1
+  while (isPalindromic(num)$isPalindromic == FALSE) {
+    num = num + 1
+  }
+  
+  return(num)
+}
+
+# test
+nextPalindrome(7152)
+# test
+nextPalindrome(765431537)
+```
+
+\begin{itemize}
+\item[c.]Use these functions to find the next palindrome for each of the following:
+  \begin{enumerate}
+    \item 391
+    \item 9928
+    \item 19272719
+    \item 109
+    \item 2
+  \end{enumerate}
+\end{itemize}
+```{r}
+nextPalindrome(391)
+nextPalindrome(9928)
+nextPalindrome(19272719)
+nextPalindrome(109)
+nextPalindrome(2)
+```
