@@ -1,0 +1,337 @@
+---
+title: "STATS506-Problem Set 2"
+author: "Shenyi Tang"
+date: "Sep 17, 2024"
+format: pdf
+geometry: "left=2cm, right=2cm, top=2cm, bottom=2cm"
+output:
+  pdf-document:
+    extra-dependencies:
+---
+
+## Shenyi Tang's GitHub Repo For STATS 506 FA 2024
+
+[https://github.com/shenyi-tang/stats506-computing-methods-and-tools.git](https://github.com/shenyi-tang/stats506-computing-methods-and-tools.git)
+
+```{r}
+library("moments")
+library("microbenchmark")
+library("MASS")
+library("ggplot2")
+library("emmeans")
+library("interactions")
+```
+
+
+## Problem 1 - Dice Game
+
+\begin{itemize}
+\item[a.] Version 1. Implement this game using a loop.
+\end{itemize}
+```{r, tidy=TRUE}
+#' @title play_dice1
+#' @param n, a positive integer, refers to the number of dice rolls
+#' @description implement the game using a loop.
+#' In each iteration randomly generates an integer 
+#' between 1 and 6 (include) 
+#' to simulate the outcome of rolling one dice
+#' 
+play_dice1 <- function(n) {
+  
+  if(!is.numeric(n) || n <= 0 || floor(n) != n) {
+    stop("The argument should be a positive integer!")
+  }
+  
+  x <- 0
+  
+  for (i in 1:n) {
+    x <- x - 2
+    roll <- sample(1:6, 1, replace = TRUE)
+    if (roll == 3 || roll == 5) {
+      x <- x + 2 * roll
+    }
+  }
+  return(x)
+}
+```
+
+
+\begin{itemize}
+\item[a.] Version 2. Implement this game using built-in R vectorized functions.
+\end{itemize}
+```{r, tidy=TRUE}
+#' @title play_dice2
+#' @param n, a positive integer, refers to the number of dice rolls
+#' @description implement the game using vectorized functions
+#' generates n positive integers between 1 and 6 at one time with replacement
+#' to simulate the result of n dice rolls
+#' 
+play_dice2 <- function(n) {
+  
+  if(!is.numeric(n) || n <= 0 || floor(n) != n) {
+    stop("The argument should be a positive integer!")
+  }
+  
+  all_roll <- sample(1:6, n, replace = TRUE)
+  
+  winnings <- ifelse(all_roll %in% c(3,5), 2 * all_roll - 2, -2)
+  
+  return(sum(winnings))
+}
+```
+
+\begin{itemize}
+\item[a.] Version 3. Implement this by rolling all the dice into one and collapsing the die rolls into a single \verb|table()|. (Hint: Be careful indexing the table - what happens if you make a table of a single dice roll? You may need to look to other resources for how to solve this.)
+\end{itemize}
+```{r, collapse=TRUE}
+#' @title play_dice3
+#' @param n, a positive integer, refers to the number of dice rolls
+#' @description using the table to show the frequency of n dice rolls
+#' 
+
+play_dice3 <- function(n) {
+  
+  if(!is.numeric(n) || n <= 0 || floor(n) != n) {
+    stop("The argument should be a positive integer!")
+  }
+  
+  all_roll <- sample(1:6, n, replace = TRUE)
+  tab <- table(factor(all_roll, levels = 1:6))
+  tab <- as.numeric(tab)
+  winnings <- tab[3] * 2 * 3 + tab[5] * 2 * 5
+  return(winnings - 2 * n)
+}
+```
+\begin{itemize}
+\item[a.] Version 4: Implement this game by using one of the \verb|apply| functions.
+\end{itemize}
+```{r, tidy=TRUE}
+#' @title play_dice4
+#' @param n, a positive integer, refers to the number of dice rolls
+#' @description using apply functions to simulate n rolls of dice
+#' 
+play_dice4 <- function(n) {
+  
+  if(!is.numeric(n) || n <= 0 || floor(n) != n) {
+    stop("The argument should be a positive integer!")
+  }
+  
+  all_roll <- sample(1:6, n, replace = TRUE)
+  
+  roll_cost <- vapply(all_roll,
+                      \(x){
+                        ifelse(x %in% c(3,5), 2 * x - 2, -2)
+                      },
+                      3)
+  return(sum(roll_cost))
+}
+
+```
+
+\begin{itemize}
+\item[b.] Demonstrate that all versions work. Do so by running each a few times, once with an input a 3, and once with an input of 3,000.
+\end{itemize}
+```{r "loopmethod", collapse=TRUE}
+# loop method
+play_dice1(3)
+play_dice1(3000)
+```
+
+```{r, collapse=TRUE}
+# built-in R vectorized
+play_dice2(3)
+play_dice2(3000)
+```
+
+```{r, collapse=TRUE}
+#table view
+play_dice3(3)
+play_dice3(3000)
+```
+
+```{r, collapse=TRUE}
+# apply method
+play_dice4(3)
+play_dice4(3000)
+```
+
+\begin{itemize}
+\item[c.]Demonstrate that the four versions give the same result. Test with inputs 3 and 3,000. (You will need to add a way to control the randomization.)
+\end{itemize}
+```{r "test with inputs 3"}
+set.seed(6)
+play_dice1(3)
+set.seed(6)
+play_dice2(3)
+set.seed(6)
+play_dice3(3)
+set.seed(6)
+play_dice4(3)
+```
+
+```{r "test with inputs 300"}
+set.seed(1234)
+play_dice1(300)
+set.seed(1234)
+play_dice2(300)
+set.seed(1234)
+play_dice3(300)
+set.seed(1234)
+play_dice4(300)
+
+```
+
+\begin{itemize}
+\item[d.]Use the microbenchmark package to clearly demonstrate the speed of the implementations. Compare performance with a low input (1,000) and a large input (100,000). Discuss the results
+\end{itemize}
+```{r "performace with input 1000", tidy=TRUE,  message=FALSE, warning=FALSE}
+set.seed(999)
+microbenchmark(
+  play_dice1(1000),
+  play_dice2(1000),
+  play_dice3(1000),
+  play_dice4(1000),
+  play_dice1(100000),
+  play_dice2(100000),
+  play_dice3(100000),
+  play_dice4(100000),
+  times = 10
+)
+
+```
+
+
+\begin{itemize}
+\item[e.]Do you think this is a fair game? Defend your decision with evidence based upon a Monte Carlo simulation.
+\end{itemize}
+```{r, tidy=TRUE}
+#' @title monte_carlo_simu
+#' @param n, a positive integer, refers to the number of dice rolls
+#' @param n_simu, a positive integer, refers to the number of simulations
+#' @description simulate n rolls of dice for n_simu times
+monte_carlo_simu <- function(n, n_simu) {
+  results <- rep(0,n_simu)
+  for (i in 1:n_simu) {
+    results[i] <- play_dice2(n)
+  }
+  return(mean(results))
+}
+
+monte_carlo_simu(100,10000)
+```
+- As the average result of 10000 times simulation is bigger than zero, the game might be biased.
+
+## Problem 2 - Liner Regression
+
+\begin{itemize}
+\item[a.]The names of the variables in this data are way too long. Rename the columns of the data to more reasonable lengths.
+\end{itemize}
+```{r,tidy=TRUE}
+cars <- read.csv2("cars.csv",
+                  sep = ',')
+names(cars) <- c("height", "length", "width", "driveline", "engine_type", "hybrid",
+                 "n_gears", "transmission", "city_mpg", "fuel_type", "hw_mpg", "class",
+                 "id", "maker", "myear", "year", "horsepower", "torque")
+```
+
+
+\begin{itemize}
+\item[b.]Restrict the data to cars whose Fuel Type is “Gasoline”.
+\end{itemize}
+```{r}
+gas_cars <- cars[cars$fuel_type == "Gasoline", ]
+```
+
+\begin{itemize}
+\item[c.]Examine the distribution of highway gas mileage. Consider whether a transformation could be used. If so, generate the transformed variable and use this variable going forward. If not, provide a short justification.
+\end{itemize}
+```{r, fig.height=2.8, fig.width=5}
+# histogram for the original data
+summary(gas_cars$hw_mpg)
+hist(gas_cars$hw_mpg, breaks = 200, probability = TRUE, xlim = c(11.0, 50),
+     main = "Highway Gas Mileage")
+paste("The skewness of Highway Gas Mileage: ",skewness(cars$hw_mpg))
+
+# Box-Cox transformation
+y <- gas_cars$hw_mpg
+model <- lm(y~1)
+lambda <- boxcox(model, lambda = seq(-3, 3, by = 0.1))
+best_lambda <- lambda$x[which.max(lambda$y)]
+paste("The best lambda for Box-Cox Transformation: ",best_lambda)
+
+# histogram for the transformed data
+gas_cars$trans_hw_mpg <- (gas_cars$hw_mpg^best_lambda - 1)/best_lambda
+hist(gas_cars$trans_hw_mpg, breaks = 200, probability = TRUE,
+     main = "Transformed Highway Gas Milage")
+```
+- According to the histogram of original highway gas mileage data, the original data is right-skewed. Therefore, I attempt to use Box-Cox Transformation to make the data closer to the normal distribution.
+
+\begin{itemize}
+\item[d.]Fit a linear regression model predicting MPG on the highway. The predictor of interest is torque. Control for:
+  \begin{itemize}
+    \item The horsepower of the engine
+    \item All three dimensions of the car
+    \item The year the car was released, as a categorical variable.
+  \end{itemize}
+Briefly discuss the estimated relationship between torque and highway MPG. Be precise about the interpretation of the estimated coefficient.
+\end{itemize}
+```{r, tidy=TRUE}
+lm.car <- lm(trans_hw_mpg ~ torque + horsepower + height + length + width + factor(year),
+             data = gas_cars)
+summary(lm.car)
+```
+- The slope of torque is $-9.892\times10^{-4}$, indicating that there's a negative relationship between torque and transformed highway MPG. All else equal, two individual cars who differ in torque in 1 unit are expectect to differ in transformed highway MPG by $-9.892\times10^{-4}$
+
+\begin{itemize}
+\item[e.]It seems reasonable that there may be an interaction between torque and horsepower. Refit the model (with \verb|lm|) and generate an interaction plot, showing how the relationship between torque and MPG changes as horsepower changes. Choose reasonable values of torque, and show lines for three different reasonable values of horsepower.
+
+(Hint: If you choose to use the interactions package for this, look at the \verb|at| = argument to help with how year comes into play - choose a reasonable single value for year.
+\end{itemize}
+```{r,tidy=TRUE, fig.width=10, fig.height=3}
+gas_cars$year <- as.factor(gas_cars$year)
+lm.cars2 <- lm(trans_hw_mpg ~ torque*horsepower + 
+                 height + length + width + year,
+             data = gas_cars)
+summary(lm.cars2)
+
+ # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+ #   98.0   187.0   260.0   272.7   335.0   774.0 
+summary(gas_cars$torque)
+
+# Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+#   100.0   190.0   266.0   270.5   317.0   638.0 
+summary(gas_cars$horsepower)
+
+interact_plot(lm.cars2, pred = "torque",
+              modx = "horsepower",
+              modx.values = c(190,266,317),
+              at = list(year = c("2010")),
+              data = gas_cars)
+emmip(lm.cars2, horsepower ~ torque, 
+      at = list(horsepower = c(190,266,317), 
+                torque = c(187, 260, 315)))
+```
+
+
+\begin{itemize}
+\item[f.] Calculate $\hat{\beta}$ from d. manually (without using \verb|lm|) by first creating a proper design matrix, then using matrix algebra to estimate $\beta$. Confirm that you get the same result as \verb|lm| did prior
+\end{itemize}
+```{r}
+X <- model.matrix(~ torque + horsepower + height + length + width + year,
+             data = gas_cars)
+y <- gas_cars$trans_hw_mpg
+beta_hat <- solve(t(X) %*% X) %*% t(X) %*% y
+beta_hat
+```
+The result of manual calculation is same as the result as \verb|lm| did
+
+
+
+
+
+
+
+
+
+
+
