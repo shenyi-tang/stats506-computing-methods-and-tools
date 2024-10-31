@@ -1,0 +1,312 @@
+---
+title: "STATS506-Problem Set 4"
+author: "Shenyi Tang"
+date: "Oct 27, 2024"
+format: 
+  pdf:
+    geometry: "left=2cm, right=2cm, top=2cm, bottom=2cm"
+    include-in-header:
+      text: |
+        \usepackage{enumitem}
+        \usepackage{fvextra}
+        \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+include-before-body:
+  text: |
+    \RecustomVerbatimEnvironment{verbatim}{Verbatim}{
+      showspaces = false,
+      showtabs = false,
+      breaksymbolleft={},
+      breaklines
+      % Note: setting commandchars=\\\{\} here will cause an error 
+    }
+---
+## Shenyi Tang's GitHub Repo For STATS 506 FA 2024
+
+[https://github.com/shenyi-tang/stats506-computing-methods-and-tools.git](https://github.com/shenyi-tang/stats506-computing-methods-and-tools.git)
+
+```{r label="import packages", message=FALSE, warning=FALSE}
+library(tidyverse)
+library(nycflights13)
+library(ggplot2)
+library(MetBrewer)
+```
+
+## Problem 1 - Tidyverse
+
+\begin{itemize}
+\item[\textbf{a.}]\bfseries{
+Generate a table reporting the mean and median departure delay per airport. Generate a second table reporting the mean and median arrival delay per airport. Exclude any destination with under 10 flights. 
+  \begin{enumerate}
+    \item Order both tables in descending mean delay
+    \item Both tables should use the airport names not the airport codes
+    \item Both tables should print all rows
+  \end{enumerate}
+}
+\end{itemize}
+```{r label="1a"}
+# merge airports and flights to get the airport names of departure and arrival
+data(flights)
+data(airports)
+
+f2 <- flights %>% 
+  left_join(., 
+            airports %>% select(faa, name), 
+            by = c("origin" = "faa")) %>% 
+  rename(dept_name = name) %>% 
+  left_join(.,
+            airports %>% select(faa, name),
+            by = c("dest" = "faa")) %>% 
+  rename(dest_name = name)
+
+# count the arrivals of destination airports
+# and filter the destination airports with more than 10 flights
+dest_apt <- f2 %>% group_by(dest_name) %>% 
+  summarise(cnt = length(flight)) %>% 
+  filter(cnt >= 10) %>% 
+  select(dest_name) %>% 
+  pull()
+
+
+# Tibble 1 - departure delay
+t1 <- f2 %>% filter(dest_name %in% dest_apt) %>% 
+  group_by(dept_name) %>%
+  summarise(dept_delay_mean = mean(dep_delay, na.rm = TRUE),
+            dept_delay_median = median(dep_delay, na.rm = TRUE)) %>% 
+  arrange(desc(dept_delay_mean)) 
+print(t1, n=98)
+
+# Tibble 2 - Arrival delay
+t2 <- f2 %>% filter(dest_name %in% dest_apt) %>% 
+  group_by(dest_name) %>% 
+  summarise(arr_delay_mean = mean(arr_delay, na.rm = TRUE),
+            arr_delay_median = median(arr_delay, na.rm = TRUE)) %>% 
+  arrange(desc(arr_delay_mean))
+print(t2, n=98)
+```
+\begin{itemize}
+\item[\textbf{b.}]\bfseries{
+How many flights did the aircraft model with the fastest average speed take? Produce a tibble with 1 row, and entries for the model, average speed (in MPH) and number of flights.
+}
+\end{itemize}
+```{r, label="1b"}
+# calculate the flight speed
+# join with planes
+f3 <- f2 %>% 
+  mutate(flight.speed = distance / (air_time / 60)) %>% 
+  left_join(., planes, by = c("tailnum" = "tailnum"))
+
+# filter out the model with fastest average speed
+fastest.model <- f3 %>% 
+  group_by(model) %>% 
+  summarise(avg_speed = mean(flight.speed, na.rm = TRUE)) %>% 
+  arrange(desc(avg_speed)) %>% 
+  slice(1) %>% 
+  select(model) %>% 
+  pull()
+
+# detailed information of the fastest model
+fastest.model.information <- f3 %>% 
+  group_by(model) %>% 
+  summarise(avg_speed = mean(flight.speed, na.rm = TRUE),
+            num_of_flights = length(flight)) %>% 
+  filter(model == fastest.model)
+  
+fastest.model.information
+```
+
+## Problem 2 - get_temp()
+\begin{itemize}
+\item[\textbf{a.}]\bfseries{Load the Chicago NMMAPS data we used in the visualization lectures. Write a function \verb|get_temp()| that allows a user to request the average temperature for a given month. The arguments should be:
+  \begin{enumerate}
+    \item \verb|month| Month, either a numeric 1-12 or a string.
+    \item \verb|year| A numeric year.
+    \item \verb|data| The data set to obtain data from.
+    \item \verb|celsius| Logically indicating whether the results should be in celsius. Default \verb|FALSE|.
+    \item \verb|average_fn| A function with which to compute the mean. Default is \verb|mean|.
+  \end{enumerate}
+}
+\end{itemize}
+```{r, label="2a"}
+#'
+#' @title get_temp(), to get the temperature of specific year and month
+#' 
+#' @param month, could be a numeric or a string
+#' @param year, a numeric year
+#' @param data, the original data set
+#' @param celsius, a logical parameter, transfer the temperature to celsius if the argument equals to TRUE
+#' @param average_fn, a function applied to the temperature
+#' 
+#' @return a float number representing the temperature
+
+nmmaps <- read_csv("chicago-nmmaps.csv",
+                   show_col_types = FALSE)
+
+
+get_temp <- function(Month, Year, data, celsius = FALSE, average_fn = mean){
+  # sanitize the input
+  # if argument Month is a numeric, it should between 1 and 12
+  tryCatch({
+    if(is.numeric(Month)){
+      if(!Month %in% 1:12){
+        stop("'Month' should be an integer between 1 and 12.")
+      }
+    }
+    # if argument Month is a string, transfer it to integer
+    else if(is.character(Month)){
+      # pattern match
+      Month <- ifelse(nchar(Month) > 3,
+                      match(tolower(Month), tolower(month.name)),
+                      match(tolower(Month), tolower(month.abb)))
+      if(is.na(Month)){
+        stop("It is an invalid month name. Please enter a valid month name.")
+      }
+    }
+    if(!is.numeric(Year)){
+      stop("'Year' should be an integer")
+    }
+    
+    temp_data <- data %>% 
+      filter(year(date) == Year,
+             month(date) == Month) %>% 
+      summarise(temp_stat = average_fn(temp[!is.na(temp)])) %>% 
+      pull(temp_stat)
+    
+    if(celsius == TRUE){
+      temp_data <- (temp_data - 32) * 5 /9
+    }
+    
+    return(temp_data)}, 
+    error = function(e){
+      message("Error:", e$message)
+    }
+  )
+}
+
+get_temp("Apr", 1999, data = nmmaps)
+get_temp("Apr", 1999, data = nmmaps, celsius = TRUE)
+get_temp(10, 1998, data = nmmaps, average_fn = median)
+get_temp(13, 1998, data = nmmaps)
+get_temp(2, 2005, data = nmmaps)
+get_temp("November", 1999, data = nmmaps, celsius = TRUE,
+         average_fn = function(x) {
+           x %>% sort -> x
+           x[2:(length(x) - 1)] %>% mean %>% return
+         })
+```
+
+## Problem 3 - Visualization
+
+```{r label="3 data"}
+df <- read.csv("df_for_ml_improved_new_market.csv")
+```
+
+
+\begin{itemize}
+\item[\textbf{a.}]\bfseries{
+Is there a change in the sales price in USD over time?
+}
+\end{itemize}
+```{r, label="3a", fig.align='center', fig.height=3}
+# calculate the average price in each year
+df %>% 
+  group_by(year) %>% 
+  summarise(avg_price = mean(price_usd, na.rm = TRUE)) %>% 
+  # line plot
+  ggplot(aes(x = year, y = avg_price)) +
+    geom_line(color = "red", lwd = 1) + 
+    geom_point(color = "black", size = 2) + 
+    labs(
+      title = "Change in the Sales Price in USD by Year",
+      x = "Year",
+      y = "Average Sales Price (USD)"
+    ) +
+    scale_y_continuous(labels = scales::dollar) +
+    # bold and center the title
+    theme(plot.title = element_text(hjust = 0.5,
+                                    face = "bold"))
+```
+- Yes, there are obvious changes over time. The average sales price gradually increase from 2000 to 2008. And there is a sharp drop in 2009.
+
+\begin{itemize}
+\item[\textbf{b.}]\bfseries{
+Does the distribution of genre of sales across years appear to change?
+}
+\end{itemize}
+```{r label="3b", fig.align='center', message=FALSE}
+
+# transfer the origin data set to longer table
+# remove the prefix "Genre___"
+pivot_df <- df %>% 
+  tidyr::pivot_longer(
+    cols = c(Genre___Photography, Genre___Print, Genre___Sculpture, Genre___Painting, Genre___Others),
+    names_to = 'genre',
+    values_to = 'if.genre'
+  ) %>% 
+  filter(if.genre == 1) %>% 
+  mutate(genre = gsub(".*___", "", genre))
+
+
+pivot_df %>%
+  group_by(year, genre) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(x = year, y = count, fill = genre)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(title = "Distribution of Genre of Sales across Years",
+       x = "Year",
+       y = "Number of Sales") +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold")) +
+  scale_fill_brewer(palette = "Pastel1")
+```
+- Generally, sales of each genre increase over year. By 2011, the number of sales are much more higher than other years.
+
+\begin{itemize}
+\item[\textbf{c.}]\bfseries{
+How does the genre affect the change in sales price over time?
+}
+\end{itemize}
+
+```{r label="3c", fig.align='center', message=FALSE}
+# calculate the average of each genre in each year
+genre_price_trends <- pivot_df %>%
+  group_by(year, genre) %>%
+  summarise(avg_price = mean(price_usd, na.rm = TRUE), .groups = 'drop')
+
+# calculate the overall average price of each year
+overall_price_trend <- pivot_df %>%
+  group_by(year) %>%
+  summarise(overall_avg_price = mean(price_usd, na.rm = TRUE), .groups = 'drop')
+
+# do the line plot
+ggplot() +
+  # line for genre_price_trends
+  geom_line(data = genre_price_trends, 
+            aes(x = year, y = avg_price, color = genre), lwd = 1) +
+  geom_point(data = genre_price_trends, 
+             aes(x = year, y = avg_price, color = genre), size = 3) +
+  
+  # line for overall_price_trend
+  geom_line(data = overall_price_trend, 
+            aes(x = year, y = overall_avg_price, color = "Overall Average"), 
+            size = 1.2) +
+  geom_point(data = overall_price_trend, 
+             aes(x = year, y = overall_avg_price, color = "Overall Average"), 
+             size = 3) +
+  
+  # set format
+  labs(title = "Average Sales Price by Genre and Year",
+       x = "Year",
+       y = "Average Sales Price (USD)",
+       color = "Price Category") +  # update the title of the legend
+  scale_y_continuous(labels = scales::dollar) +
+  scale_color_manual(values = c("Overall Average" = "black", 
+                                  "Photography" = "#FBB4AE", 
+                                  "Print" = "#B3CDE3", 
+                                  "Sculpture" = "#CCEBC5", 
+                                  "Painting" = "#DECBE4", 
+                                  "Others" = "#F9CB9C")) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+
+```
+- According to the plot above, photography and prints showed the most dramatic price changes, while sculpture maintained the most stable pricing over time. 
