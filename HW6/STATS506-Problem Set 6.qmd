@@ -1,0 +1,287 @@
+---
+title: "STATS506-Problem Set 6"
+author: "Shenyi Tang"
+date: "Dec 3, 2024"
+format: 
+  pdf:
+    geometry: "left=2cm, right=2cm, top=2cm, bottom=2cm"
+    include-in-header:
+      text: |
+        \usepackage{enumitem}
+        \usepackage{fvextra}
+        \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+include-before-body:
+  text: |
+    \RecustomVerbatimEnvironment{verbatim}{Verbatim}{
+      showspaces = false,
+      showtabs = false,
+      breaksymbolleft={},
+      breaklines
+      % Note: setting commandchars=\\\{\} here will cause an error 
+    }
+---
+## Shenyi Tang's GitHub Repo For STATS 506 FA 2024
+
+[https://github.com/shenyi-tang/stats506-computing-methods-and-tools.git](https://github.com/shenyi-tang/stats506-computing-methods-and-tools.git)
+
+```{r, label="import packages", warning=FALSE, message=FALSE}
+library(DBI)
+library(tidyverse)
+library(rsample)
+library(parallel)
+library(future)
+library(furrr)
+library(microbenchmark)
+```
+
+## Stratified Bootstrapping
+
+```{r, label="import data"}
+lahman <- dbConnect(RSQLite::SQLite(), "lahman_1871-2022.sqlite")
+```
+
+\begin{itemize}
+\item[\textbf{a.}]\bfseries{
+Calculate the average RF for each team in the Fielding table. Then, since we don’t have a closed form for the standard deviation of this statistic, carry out a stratified bootstrap by team to estimate it. Do this out three ways:
+  \begin{enumerate}
+  \item Without any parallel processing
+  \item Using parallel processing with the `parallel` package.
+  \item Using futures with the `future` package.
+  \end{enumerate}
+Generate at least 1,000 bootstrapped samples for each approach.
+}
+\end{itemize}
+```{r label="1a.avgrf"}
+df <- dbGetQuery(lahman,
+                 "select * from fielding")
+
+
+# generate the new field "RF"
+new.df <- df %>% mutate(RF = 3*(PO+A)/InnOuts)
+
+# filter out the null value of InnOuts to get the valid RF value
+# generate the new field "RF"
+new.df.filter <- df %>% 
+  filter(!is.na(InnOuts)) %>% 
+  filter(InnOuts > 0) %>% 
+  mutate(RF = 3*(PO+A)/InnOuts)
+
+# calculate the average RF for each team
+avg.RF <- dbGetQuery(lahman,
+                     "select
+                        teamID
+                        , avg(3*(PO+A)/NULLIF(InnOuts, 0)) as avg_rf
+                      from fielding
+                      where InnOuts > 0
+                      group by teamID
+                      order by avg_rf desc")
+
+head(avg.RF, 10)
+```
+```{r,label="1a.w/o parallel", warning=FALSE, message=FALSE}
+set.seed(506)
+
+##' @title do the stratified bootstrap
+##' @param data, the original dataset
+##' @param strata, within the strata we do the bootstrap
+##' @param N, integer, the sample size of the stratified bootstrap
+##' 
+stratified_bootstrap <- function(data, strata = "teamID", N = 1000) {
+  rsamples <- replicate(N, {
+    # do the stratified bootstrap
+    bootstrap_sample <- data %>% 
+      # to clarify that strata is an arg other than a column name
+      group_by(!!sym(strata)) %>% 
+      sample_n(size = n(), replace = TRUE)
+    
+    # calculate the average RF of each team in the bootstrap sample
+    bootstrap_sample %>% 
+      group_by(!!sym(strata)) %>% 
+      summarise(mean_RF = mean(RF, na.rm = TRUE))
+  }, simplify = FALSE
+  )
+  return(rsamples)
+}
+
+# the result of 1000 times bootstrap
+sample1 <- stratified_bootstrap(new.df.filter, strata = "teamID", N = 1000)
+# bind the 1000 bootstrap results vertically
+sample1.df <- as.data.frame(bind_rows(sample1))
+# calculate the standard error of the RF of each team
+sample1.se <- rownames_to_column(as.data.frame(tapply(sample1.df$mean_RF, sample1.df$teamID, sd, na.rm = TRUE)), 
+                                 var = "teamID")
+colnames(sample1.se) <- c("teamID", "SD")
+head(sample1.se)
+```
+
+```{r, label="1a.w/i parallel"}
+set.seed(506)
+
+##' @title do the stratified bootstrap using parallel passage
+##' @param data, data.frame, the original dataset
+##' @param strata, string, within the strata we do
+##' @param N, int, the size of bootstrap samples
+##' @param n_cores, int, the number of cores
+##' 
+parallel_stratified_bootstrap <- function(data, strata, N, n_cores = detectCores()) {
+  cl <- makeCluster(n_cores/2)
+  
+  on.exit(stopCluster(cl))
+  clusterEvalQ(cl, library(tidyverse))
+  
+
+  rsamples <- parLapply(cl, 1:N, function(i, data, strata){
+    bootstrap_sample <- data %>%
+      group_by_at(vars(all_of(strata))) %>%
+      sample_n(size = n(), replace = TRUE)
+
+    bootstrap_sample %>%
+      group_by_at(vars(all_of(strata))) %>%
+      summarise(mean_RF = mean(RF, na.rm = TRUE))
+  }, data = data, strata = strata)
+
+  
+  rsamples <- as.data.frame(bind_rows(rsamples))
+  return(rsamples)
+}
+
+# the result of 1000 times bootstrap
+sample2 <- parallel_stratified_bootstrap(data = new.df.filter, strata = "teamID", N = 1000)
+# calculate the sd of RF of each team and rename the columns
+sample2.se <- rownames_to_column(as.data.frame(tapply(sample2$mean_RF, sample2$teamID, sd)), 
+                                 var = "teamID")
+colnames(sample2.se) <- c("teamID", "SD")
+head(sample2.se)
+
+
+```
+
+```{r, label="1a.w/i futures"}
+set.seed(506)
+
+##' @title do the stratified bootstrap using parallel passage
+##' @param data, data.frame, the original dataset
+##' @param strata, string, within the strata we do
+##' @param N, int, the size of bootstrap samples
+##' 
+future_stratified_bootstrap <- function(data, strata, N) {
+  # set multisession
+  # avoid using all the resources
+  plan(multisession, workers = availableCores() - 1)
+  
+  # mapping the result into the dataframe
+  future_map_dfr(1:N, function(i, .data, .strata){
+    bootstrap_sample <- .data %>% 
+      group_by(across(all_of(.strata))) %>% 
+      sample_n(size = n(), replace = TRUE) %>% 
+      summarize(mean_RF = mean(RF, na.rm = TRUE))
+  }, .data = data, .strata = strata, .options = furrr_options(seed = TRUE))
+  
+}
+
+sample3 <- future_stratified_bootstrap(data = new.df.filter, strata = "teamID", N = 1000)
+sample3.se <- rownames_to_column(as.data.frame(tapply(sample3$mean_RF, sample3$teamID, sd, na.rm = TRUE)), 
+                                 var = "teamID")
+colnames(sample3.se) <- c("teamID", "SD")
+head(sample3.se)
+```
+
+
+\begin{itemize}
+\item[\textbf{b.}]\bfseries{
+Generate a table showing the estimated RF and associated standard errors for the teams with the 10 highest RF from the three approaches.
+}
+\end{itemize}
+```{r, label="1b"}
+top10_sample1_team <- sample1.df %>% 
+  group_by(teamID) %>% 
+  summarize(avg_RF = mean(mean_RF, na.rm = TRUE)) %>% 
+  slice_max(order_by = avg_RF, n = 10) %>% 
+  pull(teamID)
+
+top10_sample2_team <- sample2 %>% 
+  group_by(teamID) %>% 
+  summarize(avg_RF = mean(mean_RF, na.rm = TRUE)) %>% 
+  slice_max(order_by = avg_RF, n = 10) %>% 
+  pull(teamID)
+
+top10_sample3_team <- sample3 %>% 
+  group_by(teamID) %>% 
+  summarize(avg_RF = mean(mean_RF, na.rm = TRUE)) %>% 
+  slice_max(order_by = avg_RF, n = 10) %>% 
+  pull(teamID)
+
+all_equal <- setequal(top10_sample1_team, top10_sample2_team) && setequal(top10_sample2_team, top10_sample3_team)
+cat("TOP 10 teams from 3 approaches are the same:", all_equal)
+
+top10_sample1_val <- sample1.df %>% 
+  filter(teamID %in% top10_sample1_team) %>% 
+  group_by(teamID) %>% 
+  summarize(avg_RF_base = mean(mean_RF, na.rm = TRUE),
+            sd_RF_base = sd(mean_RF, na.rm = TRUE)) %>% 
+  arrange(desc(avg_RF_base))
+
+top10_sample2_val <- sample2 %>% 
+  filter(teamID %in% top10_sample2_team) %>% 
+  group_by(teamID) %>% 
+  summarize(avg_RF_parallel = mean(mean_RF, na.rm = TRUE),
+            sd_RF_parallel = sd(mean_RF, na.rm = TRUE))
+
+top10_sample3_val <- sample3 %>% 
+  filter(teamID %in% top10_sample3_team) %>% 
+  group_by(teamID) %>% 
+  summarize(avg_RF_future = mean(mean_RF, na.rm = TRUE),
+            sd_RF_future = sd(mean_RF, na.rm = TRUE))
+
+final_tibble <- top10_sample1_val %>% 
+  inner_join(., top10_sample2_val, by = "teamID") %>% 
+  inner_join(., top10_sample3_val, by = "teamID")
+
+final_tibble
+```
+
+
+\begin{itemize}
+\item[\textbf{}]\bfseries{
+Report and discuss the performance difference between the versions.
+}
+\end{itemize}
+```{r, label="1c"}
+set.seed(506)
+
+time1 <- system.time({
+  stratified_bootstrap(new.df.filter, strata = "teamID", N = 1000)
+})
+
+time2 <- system.time({
+  parallel_stratified_bootstrap(data = new.df.filter, strata = "teamID", N = 1000)
+})
+
+time3 <- system.time({
+  future_stratified_bootstrap(data = new.df.filter, strata = "teamID", N = 1000)
+})
+
+
+##' @title to create a dataframe presenting the time consuming result of each approach
+##' @param approach, string, the name of each approach
+##' @param time_result, the output of system.time()
+create_time_df <- function(approach, time_result) {
+  data.frame(
+    Approach = approach,
+    User = time_result["user.self"],
+    System = time_result["sys.self"],
+    Elapsed = time_result["elapsed"],
+    row.names = NULL
+  )
+}
+
+time_consumption <- rbind(
+  create_time_df("Non-parallel", time1),
+  create_time_df("Parallel", time2),
+  create_time_df("Future", time3)
+)
+
+time_consumption
+```
+
+- The outputs of three approaches have slightly differences but are similar in general. The Usage of parallel processing reduces the running time of bootstrap sharply, among which the parallel package performs the best.
